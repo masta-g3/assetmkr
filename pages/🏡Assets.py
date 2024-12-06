@@ -1,15 +1,11 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
-
 import plotly.express as px
-import plotly.graph_objects as go
 
-# Set page title and icon
-st.set_page_config(page_title="AssetMKR", page_icon=":moneybag:")
+import utils as u
+import db
 
-# Connect to SQLite database
-conn = sqlite3.connect("my_portfolio.db", check_same_thread=False)
+st.set_page_config(page_title="Assets", page_icon=":moneybag:", layout="wide")
 
 allowed_platforms = [
     "Wealthfront",
@@ -22,44 +18,8 @@ allowed_platforms = [
     "Debt"
 ]
 
-
-def add_new_entry(date, platform, amount, rate):
-    """Add new entry to the portfolio database."""
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        INSERT INTO portfolio (Date, Platform, Amount, Rate)
-        VALUES (?, ?, ?, ?)
-    """,
-        (date, platform, amount, rate),
-    )
-    conn.commit()
-
-
-def get_data_by_date(date):
-    """Fetch data from the database for the selected date."""
-    query = "SELECT * FROM portfolio WHERE Date = ?"
-    df = pd.read_sql(query, conn, params=(date,))
-    df["Allocation"] = df["Amount"] / df["Amount"].sum()
-    df.sort_values(by=["Allocation"], ascending=False, inplace=True)
-    df.reset_index(drop=True, inplace=True)
-    return df
-
-
-def submit_changes(df, date):
-    """Replace data for the day in DB with the edited data."""
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM portfolio WHERE Date = ?", (date,))
-    conn.commit()
-    if len(df) > 0:
-        df = df[["Date", "Platform", "Amount", "Rate"]]
-        df.to_sql("portfolio", conn, if_exists="append", index=False)
-    conn.commit()
-
-
-def plot_evolution():
+def plot_evolution(df: pd.DataFrame, current_date: pd.Timestamp) -> px.line:
     """ Area chart of portfolio evolution over time. """
-    df = pd.read_sql("SELECT * FROM portfolio", conn)
     df["Allocation"] = df["Amount"] / df["Amount"].sum()
     df.sort_values(by=["Date"], inplace=True)
     df.reset_index(drop=True, inplace=True)
@@ -71,11 +31,13 @@ def plot_evolution():
         y="Amount",
         color="Platform",
         color_discrete_sequence=px.colors.qualitative.Plotly,
-        title="Portfolio evolution",
     )
+
+    ## Add vertical line for the current date.
+    fig.add_vline(x=current_date, line_dash="dot", line_color="black")
     fig.update_layout(
-        xaxis_title="Date",
-        yaxis_title="Amount (USD)",
+        xaxis_title=None,
+        yaxis_title=None,
         legend_title="Platform",
         legend=dict(
             orientation="h",
@@ -85,12 +47,12 @@ def plot_evolution():
             x=1,
         ),
     )
-
     return fig
 
 
 def main():
-    st.title("💸 AssetMKR 💸")
+    u.adjust_sidebar(300)
+    st.title("🏡 Assets")
 
     ## New entry.
     with st.sidebar.form(key="new_entry_form"):
@@ -101,25 +63,20 @@ def main():
         submit_button = st.form_submit_button(label="Add Entry")
 
         if submit_button:
-            add_new_entry(date, platform, amount, rate)
+            db.add_portfolio_entry(date, platform, amount, rate)
             st.sidebar.success("Added new entry successfully!")
 
-    ## Tabs for different views.
-    tabs = st.tabs(["Snapshot", "Evolution"])
+    dates = db.get_portfolio_dates()
+    selected_date = st.columns((1,5,1))[1].select_slider(
+        "Date:", options=dates, value=dates[-1], label_visibility="collapsed"
+    )
 
+    tabs = st.columns(2)
     # Date view.
     with tabs[0]:
-        cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT Date FROM portfolio")
-        dates = sorted([item[0] for item in cursor.fetchall()])
-        selected_date = st.select_slider(
-            "Date:", options=dates, label_visibility="hidden"
-        )
-        df = get_data_by_date(selected_date)
-
-        ## Totals.
-        total = round(df["Amount"].sum(), 2)
-        st.markdown(f"### 💰 **Total:** ${total:,}")
+        df = db.get_portfolio_data_by_date(selected_date)
+        total = round(df["Amount"].sum())
+        st.markdown(f"### 💰 **Total:** ${total:,} USD")
         disabled_cols = ["Date", "Allocation"]
 
         column_config = {
@@ -152,11 +109,12 @@ def main():
         if (not (edited_df.values == df.values).all().all() or len(edited_df) != len(df)):
             update_button = st.button("Submit changes")
             if update_button:
-                submit_changes(edited_df, selected_date)
+                db.submit_portfolio_changes(edited_df, selected_date)
 
     ## Evolution view.
     with tabs[1]:
-        fig = plot_evolution()
+        df = db.get_portfolio_ts()
+        fig = plot_evolution(df, selected_date)
         st.plotly_chart(fig, use_container_width=True)
 
 

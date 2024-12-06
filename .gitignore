@@ -1,0 +1,13 @@
+.streamlit/secrets.toml
+.env
+.DS_Store
+__pycache__/
+data/
+imgs/
+logs/
+repo_structure.yaml
+*/.DS_Store
+.idea/
+.history/
+.vscode/
+*.log
