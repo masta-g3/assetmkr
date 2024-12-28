@@ -1,5 +1,6 @@
 import pandas as pd
 import streamlit as st
+from typing import Union
 import plotly.graph_objects as go
 from streamlit_plotly_events import plotly_events
 import time
@@ -21,7 +22,7 @@ if "todo_suggestions" not in st.session_state:
     st.session_state["todo_suggestions"] = pd.DataFrame()
 
 
-def plot_activity_map(df_year: pd.DataFrame) -> (go.Figure, pd.DataFrame):
+def plot_activity_map(df_year: pd.DataFrame) -> Union[go.Figure, pd.DataFrame]:
     """Creates a calendar heatmap plot along with map of dates in a DF."""
     colors = ["#f2f2f2", "#87bc45", "#e60049"]
 

@@ -81,11 +81,15 @@ def commit(edited_rows, added_rows, deleted_rows, new_df):
     added_df = new_df.iloc[len(new_df) - len(added_rows) :]
     edited_df = new_df.iloc[:len(new_df) - len(added_rows)]
 
-    ## Timestamp update.
+    ## Timestamp update only for status changes
     for row_index in edited_rows.keys():
-        edited_df.loc[row_index, "edit_tstp"] = datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+        # Check if status was changed in this edit
+        if "status" in edited_rows[row_index]:
+            edited_df.loc[row_index, "edit_tstp"] = datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+            
+    # Set timestamp for new entries
     added_df["edit_tstp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     added_df["tstp"] = datetime.now()
 
@@ -215,6 +219,11 @@ def get_chart_theme_colors():
         'paper_bg': 'rgba(255, 255, 255, 0.02)'     # Nearly transparent background
     }
 
+def get_group_colors(groups):
+    """Create a consistent color mapping for groups."""
+    colors = px.colors.qualitative.Bold
+    return {group: colors[idx % len(colors)] for idx, group in enumerate(sorted(groups))}
+
 def plot_activity_over_time(df: pd.DataFrame, groupby: str, start_date: datetime.date) -> go.Figure:
     """Create an aesthetically enhanced bar chart visualization of task completion over time."""
     theme_colors = get_chart_theme_colors()
@@ -232,13 +241,14 @@ def plot_activity_over_time(df: pd.DataFrame, groupby: str, start_date: datetime
 
     if groupby not in plot_df.columns:
         plot_df[groupby] = plot_df["meta"].apply(lambda x: x.get(groupby, None))
-        plot_df[groupby].fillna("Unknown", inplace=True)
+        plot_df[groupby].fillna("Misc", inplace=True)
 
-    fig = go.Figure()
-    # Use a vibrant color palette that works in both modes
-    colors = px.colors.qualitative.Safe
+    # Get consistent colors for groups
+    color_map = get_group_colors(plot_df[groupby].unique())
     
-    for idx, value in enumerate(plot_df[groupby].unique()):
+    fig = go.Figure()
+    
+    for value in sorted(plot_df[groupby].unique()):
         value_df = plot_df[plot_df[groupby] == value]
         fig.add_trace(
             go.Bar(
@@ -247,7 +257,7 @@ def plot_activity_over_time(df: pd.DataFrame, groupby: str, start_date: datetime
                 name=value,
                 text=value_df["name"],
                 hovertemplate="%{text}<br>Date: %{x}<br>%{fullData.name}<extra></extra>",
-                marker_color=colors[idx % len(colors)],
+                marker_color=color_map[value],
                 marker_line_color=theme_colors['axis_line'],
                 marker_line_width=0.5,
                 opacity=0.85,
@@ -350,29 +360,37 @@ def plot_activity_over_time_v2(df: pd.DataFrame, groupby: str, start_date: datet
 
     if groupby not in plot_df.columns:
         plot_df[groupby] = plot_df["meta"].apply(lambda x: x.get(groupby, None))
-        plot_df[groupby].fillna("Unknown", inplace=True)
+        plot_df[groupby].fillna("Misc", inplace=True)
 
     plot_df = plot_df.groupby([groupby, "edit_tstp"]).size().reset_index(name="count")
     plot_df = plot_df.sort_values("edit_tstp")
     plot_df["cumulative"] = plot_df.groupby(groupby)["count"].cumsum()
 
+    # Get consistent colors for groups
+    color_map = get_group_colors(plot_df[groupby].unique())
+    
     fig = go.Figure()
-    # Use a vibrant color palette that works in both modes
-    colors = px.colors.qualitative.Safe
     
     end_date = datetime.now().date()
     date_range = pd.date_range(start=start_date, end=end_date, freq='D')
     all_dates = pd.DataFrame({'edit_tstp': date_range.date})
-    groups = plot_df[groupby].unique()
     
-    for idx, group in enumerate(groups):
+    for group in sorted(plot_df[groupby].unique()):
         group_data = plot_df[plot_df[groupby] == group].copy()
         group_data = pd.merge(all_dates, group_data, on='edit_tstp', how='left')
         group_data[groupby].fillna(group, inplace=True)
         group_data['cumulative'].fillna(method='ffill', inplace=True)
         group_data['cumulative'].fillna(0, inplace=True)
         
-        base_color = colors[idx % len(colors)]
+        base_color = color_map[group]
+        
+        # Handle both RGB and hex color formats
+        if base_color.startswith('rgb'):
+            rgb_values = base_color.strip('rgb()').split(',')
+            fill_color = f'rgba({",".join(rgb_values)},0.25)'
+        else:
+            rgb_values = px.colors.hex_to_rgb(base_color)
+            fill_color = f'rgba({",".join(str(int(x)) for x in rgb_values)},0.25)'
         
         fig.add_trace(
             go.Scatter(
@@ -385,7 +403,7 @@ def plot_activity_over_time_v2(df: pd.DataFrame, groupby: str, start_date: datet
                     color=base_color
                 ),
                 fill='tonexty',
-                fillcolor=f'rgba{tuple(list(px.colors.hex_to_rgb(base_color)) + [0.25])}',
+                fillcolor=fill_color,
                 hovertemplate="%{text}<br>Date: %{x}<br>Total Tasks: %{y}<extra></extra>",
                 text=[group] * len(group_data)
             )
@@ -465,7 +483,7 @@ def plot_activity_over_time_v2(df: pd.DataFrame, groupby: str, start_date: datet
 
     return fig
 
-def create_focus_timer(task_name: str, total_minutes: int = 1):
+def create_focus_timer(task_name: str, total_minutes: int = 25):
     """Create and display a focus timer for the selected task."""
     if "focus_start_time" not in st.session_state:
         st.session_state.focus_start_time = time.time()
@@ -478,7 +496,7 @@ def create_focus_timer(task_name: str, total_minutes: int = 1):
 
     focus_container = st.container()
     with focus_container:
-        st.markdown(f"🎯 **Focusing on:** {task_name}")
+        st.markdown(f"### 🎯 Focusing on: :rainbow[*{task_name}*]")
         cols = st.columns([2, 1, 1])
         
         timer_ph = cols[0].empty()
@@ -657,13 +675,13 @@ def main():
         plot_groupby = control_cols[0].selectbox(
             "**Group By**",
             ["type", "project"],
-            index=0,
+            index=1,
             key="plot_groupby"
         )
         
         viz_type = control_cols[1].radio(
             "**Visualization Type**",
-            ["Classic", "Enhanced"],
+            ["Daily", "Cumulative"],
             horizontal=True,
             key="viz_type"
         )
@@ -678,7 +696,7 @@ def main():
         )
     
     with viz_plot:
-        if viz_type == "Classic":
+        if viz_type == "Daily":
             fig = plot_activity_over_time(st.session_state["todo_df"], plot_groupby, start_date)
         else:
             fig = plot_activity_over_time_v2(st.session_state["todo_df"], plot_groupby, start_date)

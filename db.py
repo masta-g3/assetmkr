@@ -314,3 +314,59 @@ def save_reflection_reaction_by_date(date: datetime.date, reaction: str) -> None
         (reaction, tstp, date),
     )
     goals_conn.commit()
+
+
+################
+## PROJECTS ##
+################
+
+def get_projects_data() -> pd.DataFrame:
+    """Fetch projects data from the database."""
+    query = "SELECT * FROM projects"
+    df = pd.read_sql(query, goals_conn)
+    df.columns = map(str.lower, df.columns)
+    df["tstp"] = pd.to_datetime(df["tstp"])
+    df.dropna(subset=["meta"], inplace=True)
+    df["meta"] = df["meta"].apply(json.loads)
+    df.sort_values(by=["tstp"], ascending=False, inplace=True)
+    df.reset_index(drop=True, inplace=True)
+    return df
+
+def add_project_item(name: str, meta: dict) -> None:
+    """Add entry to the projects list."""
+    tstp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor = goals_conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO projects (NAME, META, TSTP)
+        VALUES (?, ?, ?)
+    """,
+        (name, json.dumps(meta), tstp),
+    )
+    goals_conn.commit()
+
+def replace_projects_list(df: pd.DataFrame) -> None:
+    """Replace the projects list with the edited data."""
+    df = df.copy()
+    cursor = goals_conn.cursor()
+    with goals_conn:
+        cursor.execute("DELETE FROM projects")
+        if len(df) > 0:
+            df["meta"] = df["meta"].apply(json.dumps)
+            df["tstp"] = df["tstp"].apply(lambda x: x.strftime("%Y-%m-%d %H:%M:%S"))
+            df.to_sql("projects", goals_conn, if_exists="replace", index=False)
+
+def create_projects_table():
+    """Create the projects table if it doesn't exist."""
+    cursor = goals_conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS projects (
+            NAME TEXT NOT NULL,
+            META TEXT,
+            TSTP TIMESTAMP
+        )
+    """)
+    goals_conn.commit()
+
+# Create tables if they don't exist
+create_projects_table()
